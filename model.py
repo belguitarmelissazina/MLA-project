@@ -1,13 +1,8 @@
 """
-DANN Model Components - Unsupervised Domain Adaptation by Backpropagation
-Authors: Ganin & Lempitsky, 2015
+DANN Model Components
 
-This module implements:
-- Gradient Reversal Layer (GRL)
-- Feature Extractors for different architectures
-- Label Predictors
-- Domain Classifiers
-- Complete DANN model
+Gradient Reversal Layer, feature extractors, label predictors,
+domain classifiers, and complete DANN model.
 """
 
 import torch
@@ -89,8 +84,7 @@ class GradientReversalLayer(nn.Module):
 class MNISTFeatureExtractor(nn.Module):
     """
     Feature extractor for MNIST experiments.
-    Architecture from Appendix B, inspired by LeNet-5.
-    
+
     Structure:
     - Conv 5x5, 32 maps, ReLU
     - Max-pool 2x2, stride 2
@@ -169,8 +163,7 @@ class MNISTDomainClassifier(nn.Module):
 class SVHNFeatureExtractor(nn.Module):
     """
     Feature extractor for SVHN experiments.
-    Architecture from Appendix B, adopted from Srivastava et al., 2014.
-    
+
     Structure:
     - Conv 5x5, 64 maps, ReLU
     - Max-pool 3x3, stride 2
@@ -257,8 +250,7 @@ class SVHNDomainClassifier(nn.Module):
 class GTSRBFeatureExtractor(nn.Module):
     """
     Feature extractor for GTSRB (traffic signs) experiments.
-    Architecture from Appendix B, based on Ciresan et al., 2012.
-    
+
     Structure:
     - Conv 5x5, 96 maps, ReLU
     - Max-pool 2x2, stride 2
@@ -337,9 +329,7 @@ class GTSRBDomainClassifier(nn.Module):
 class OfficeFeatureExtractor(nn.Module):
     """
     Feature extractor for Office dataset experiments.
-    Uses pretrained AlexNet with modified fc7 bottleneck (256-dim).
-    
-    Following Tzeng et al., 2014 architecture used in the paper.
+    Uses pretrained AlexNet with 256-dimensional fc7 bottleneck.
     """
     
     def __init__(self, pretrained: bool = True):
@@ -359,10 +349,9 @@ class OfficeFeatureExtractor(nn.Module):
         # Extract features up to fc6
         self.features = alexnet_model.features
         self.avgpool = alexnet_model.avgpool
-        
-        # Modified classifier with 256-dim bottleneck
+
         self.fc6 = nn.Linear(256 * 6 * 6, 4096)
-        self.fc7 = nn.Linear(4096, 256)  # Bottleneck
+        self.fc7 = nn.Linear(4096, 256)
         self.relu = nn.ReLU(inplace=True)
         self.dropout = nn.Dropout(0.5)
         
