@@ -1,5 +1,5 @@
 """
-Dataset Handling for DANN Experiments
+Dataset Handling for unsupervised domain adaptation by backpropagation 
 Authors: Ganin & Lempitsky, 2015 Reproduction
 
 This module implements:
