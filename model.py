@@ -575,6 +575,10 @@ class SourceOnlyModel(nn.Module):
         """Get class predictions."""
         features = self.feature_extractor(x)
         return self.label_predictor(features)
+    
+    def get_features(self, x: torch.Tensor) -> torch.Tensor:
+        """Extract features (for t-SNE visualization)."""
+        return self.feature_extractor(x)
 
 
 def create_source_only_model(
