@@ -35,6 +35,22 @@ pip install torch torchvision numpy matplotlib scikit-learn pillow pyyaml tqdm
 ## Quick Start
 in order for training to work you need to download the datasets they are not included here due to size limitations. 
 
+## Dataset Preparation
+
+### Automatic download:
+MNIST, SVHN, GTSRB are automatically downloaded when you run training 
+### Manual download required:
+- **office 31**
+- **BSDS500** (for MNIST-M generation)
+- **Synthetic signs**
+
+### Synthetic dataset generation:
+```bash
+# Generate synthetic numbers dataset
+python syngen.py
+# Output: datasets/syn_numbers/{train,test}.pkl
+```
+
 
 ### 2. Train DANN Model
 
@@ -264,19 +280,3 @@ seed: 42
 - `--epochs`: Number of training epochs, default 100
 - `--seed`: Random seed for reproducibility
 
-
-## Dataset Preparation
-
-### Automatic download:
-MNIST, SVHN, GTSRB are automatically downloaded when you run training 
-### Manual download required:
-- **office 31**
-- **BSDS500** (for MNIST-M generation)
-- **Synthetic signs**
-
-### Synthetic dataset generation:
-```bash
-# Generate synthetic numbers dataset
-python syngen.py
-# Output: datasets/syn_numbers/{train,test}.pkl
-```
