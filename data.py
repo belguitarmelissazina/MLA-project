@@ -576,11 +576,10 @@ class GTSRB(Dataset):
         from torchvision.datasets import GTSRB as TorchvisionGTSRB
 
         # Use torchvision's GTSRB dataset
-        # Note: torchvision only provides the training split (test set has no labels)
-        # We'll split the training set in get_dataloaders()
+        # Using training split; test set has no labels
         self.dataset = TorchvisionGTSRB(
             root=root,
-            split='train',  # Always use train split because it has labels
+            split='train',
             transform=transform,
             download=download
         )
@@ -755,7 +754,7 @@ def get_svhn_transforms(train: bool = True, data_root: str = './datasets') -> tr
     transform_list = [
         transforms.Resize((32, 32)),
         transforms.ToTensor(),
-        # Fixed normalization to [-1, 1] range
+        # Normalize to [-1, 1] range
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ]
 

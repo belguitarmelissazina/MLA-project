@@ -164,34 +164,64 @@ class SVHNFeatureExtractor(nn.Module):
     """
     Feature extractor for SVHN experiments.
 
-    Structure:
+    Structure (from Srivastava et al., 2014 Appendix B):
+    Paper specifies p = (0.9, 0.75, 0.75, 0.5, 0.5, 0.5) where p is RETENTION probability
+    
+    - INPUT: Dropout (retain p=0.9, drop 0.1)
     - Conv 5x5, 64 maps, ReLU
     - Max-pool 3x3, stride 2
+    - Dropout (retain p=0.75, drop 0.25)
     - Conv 5x5, 64 maps, ReLU
     - Max-pool 3x3, stride 2
+    - Dropout (retain p=0.75, drop 0.25)
     - Conv 5x5, 128 maps, ReLU
-    
-    For 32x32 input: output is 128 * 3 * 3 = 1152 features
+    - Dropout (retain p=0.5, drop 0.5)
+
+    Note: Srivastava uses retention probability, PyTorch uses drop probability
+    So Srivastava p=0.9 (keep 90%) maps to PyTorch Dropout2d(0.1) (drop 10%)
+
+    For 32x32 input: output is 128 * 8 * 8 = 8192 features
     """
-    
+
     def __init__(self):
         super().__init__()
+        # Input dropout (p=0.9 retention, 0.1 drop)
+        self.dropout_input = nn.Dropout2d(0.1)
+
         self.conv1 = nn.Conv2d(3, 64, kernel_size=5, stride=1, padding=2)
         self.pool1 = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        # Conv1 dropout (p=0.75 retention, 0.25 drop)
+        self.dropout_conv1 = nn.Dropout2d(0.25)
+
         self.conv2 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)
         self.pool2 = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        # Conv2 dropout (p=0.75 retention, 0.25 drop)
+        self.dropout_conv2 = nn.Dropout2d(0.25)
+
         self.conv3 = nn.Conv2d(64, 128, kernel_size=5, stride=1, padding=2)
-        self.relu = nn.ReLU(inplace=True)
+        # Conv3 dropout (p=0.5 retention, 0.5 drop)
+        self.dropout_conv3 = nn.Dropout2d(0.5)
         
+        self.relu = nn.ReLU(inplace=True)
+
         # Output for 32x32 input
-        self.output_dim = 128 * 8 * 8  
-    
+        self.output_dim = 128 * 8 * 8
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Input dropout
+        x = self.dropout_input(x)
+        
         x = self.relu(self.conv1(x))  # 32 -> 32
         x = self.pool1(x)              # 32 -> 16
+        x = self.dropout_conv1(x)      # After pool
+        
         x = self.relu(self.conv2(x))  # 16 -> 16
         x = self.pool2(x)              # 16 -> 8
+        x = self.dropout_conv2(x)      # After pool
+        
         x = self.relu(self.conv3(x))  # 8 -> 8
+        x = self.dropout_conv3(x)      # After relu (0.5 drop!)
+        
         x = x.view(x.size(0), -1)
         return x
 
@@ -199,52 +229,47 @@ class SVHNFeatureExtractor(nn.Module):
 class SVHNLabelPredictor(nn.Module):
     """
     Label predictor for SVHN experiments.
-    
-    Structure:
-    - FC 3072 units, ReLU
-    - FC 2048 units, ReLU
+
+    Structure (from Srivastava et al., 2014 Appendix B):
+    - FC 3072 units, ReLU, Dropout (retain p=0.5, drop 0.5)
+    - FC 2048 units, ReLU, Dropout (retain p=0.5, drop 0.5)
     - FC 10 units, Softmax
+
+    Note: Srivastava p=0.5 retention maps to PyTorch Dropout(0.5) drop
     """
-    
+
     def __init__(self, input_dim: int = 8192, num_classes: int = 10):
         super().__init__()
         self.fc1 = nn.Linear(input_dim, 3072)
         self.fc2 = nn.Linear(3072, 2048)
         self.fc3 = nn.Linear(2048, num_classes)
         self.relu = nn.ReLU(inplace=True)
+        # Dropout: retain 0.5, drop 0.5 (same value)
         self.dropout1 = nn.Dropout(0.5)
         self.dropout2 = nn.Dropout(0.5)
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.dropout1(self.relu(self.fc1(x)))
-        x = self.dropout2(self.relu(self.fc2(x)))
+        x = self.relu(self.fc1(x))
+        x = self.dropout1(x)
+        x = self.relu(self.fc2(x))
+        x = self.dropout2(x)
         x = self.fc3(x)
         return x
-
-
 class SVHNDomainClassifier(nn.Module):
     """
     Domain classifier for SVHN experiments.
-    Standard 3-layer architecture: x -> 1024 -> 1024 -> 1
-    
-    Structure:
-    - FC 1024 units, ReLU
-    - FC 1024 units, ReLU
-    - FC 1 unit, Logistic
+    SIMPLIFIED: x -> 100 -> 1 (sweet spot)
     """
     
     def __init__(self, input_dim: int = 8192):
         super().__init__()
-        self.fc1 = nn.Linear(input_dim, 1024)
-        self.fc2 = nn.Linear(1024, 1024)
-        self.fc3 = nn.Linear(1024, 1)
+        self.fc1 = nn.Linear(input_dim, 100)
+        self.fc2 = nn.Linear(100, 1)
         self.relu = nn.ReLU(inplace=True)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.relu(self.fc1(x))
-        x = self.relu(self.fc2(x))
-        x = self.fc3(x)
-        return x
+        return self.fc2(x)
 
 
 class GTSRBFeatureExtractor(nn.Module):
@@ -329,44 +354,57 @@ class GTSRBDomainClassifier(nn.Module):
 class OfficeFeatureExtractor(nn.Module):
     """
     Feature extractor for Office dataset experiments.
-    Uses pretrained AlexNet with 256-dimensional fc7 bottleneck.
+    Uses pretrained AlexNet and adds a 256-dimensional bottleneck after pretrained fc7.
+
+    IMPORTANT: Always uses pretrained ImageNet weights.
+    Office-31 experiments require pretrained features due to limited training samples.
     """
-    
-    def __init__(self, pretrained: bool = True):
+
+    def __init__(self):
         super().__init__()
+        # Load pretrained ImageNet weights
         try:
             from torchvision.models import alexnet, AlexNet_Weights
-            if pretrained:
-                weights = AlexNet_Weights.IMAGENET1K_V1
-            else:
-                weights = None
+            weights = AlexNet_Weights.IMAGENET1K_V1
             alexnet_model = alexnet(weights=weights)
         except ImportError:
-            # Fallback for older torchvision
             from torchvision.models import alexnet
-            alexnet_model = alexnet(pretrained=pretrained)
-        
-        # Extract features up to fc6
+            alexnet_model = alexnet(pretrained=True)
+
+        # Backbone
         self.features = alexnet_model.features
         self.avgpool = alexnet_model.avgpool
 
+        # fc6 and fc7 layers
         self.fc6 = nn.Linear(256 * 6 * 6, 4096)
-        self.fc7 = nn.Linear(4096, 256)
+        self.fc7 = nn.Linear(4096, 4096)
+
+        # Bottleneck layer
+        self.bottleneck = nn.Linear(4096, 256)
+
         self.relu = nn.ReLU(inplace=True)
         self.dropout = nn.Dropout(0.5)
-        
-        # Copy pretrained weights for fc6
+
+        # Copy weights from pretrained AlexNet
         self.fc6.weight.data = alexnet_model.classifier[1].weight.data
         self.fc6.bias.data = alexnet_model.classifier[1].bias.data
-        
+
+        self.fc7.weight.data = alexnet_model.classifier[4].weight.data
+        self.fc7.bias.data = alexnet_model.classifier[4].bias.data
+
         self.output_dim = 256
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.features(x)
         x = self.avgpool(x)
         x = x.view(x.size(0), 256 * 6 * 6)
+
+        # AlexNet style: dropout+relu after fc6 and fc7
         x = self.dropout(self.relu(self.fc6(x)))
-        x = self.relu(self.fc7(x))
+        x = self.dropout(self.relu(self.fc7(x)))
+
+        # Bottleneck (new)
+        x = self.relu(self.bottleneck(x))
         return x
 
 
@@ -389,7 +427,7 @@ class OfficeDomainClassifier(nn.Module):
     Domain classifier for Office dataset.
     2-layer architecture: x -> 1024 -> 1024 -> 1
     
-    As specified: "2-layer domain classifier (x → 1024 → 1024 → 2)"
+    As specified: "2-layer domain classifier (x, 1024, 1024, 1)"
     """
     
     def __init__(self, input_dim: int = 256):
@@ -526,7 +564,7 @@ def create_dann_model(
             input_dim=feature_extractor.output_dim
         )
     elif architecture == 'office':
-        feature_extractor = OfficeFeatureExtractor(pretrained=pretrained)
+        feature_extractor = OfficeFeatureExtractor()
         label_predictor = OfficeLabelPredictor(
             input_dim=feature_extractor.output_dim,
             num_classes=num_classes
@@ -616,7 +654,7 @@ def create_source_only_model(
             num_classes=num_classes
         )
     elif architecture == 'office':
-        feature_extractor = OfficeFeatureExtractor(pretrained=pretrained)
+        feature_extractor = OfficeFeatureExtractor()
         label_predictor = OfficeLabelPredictor(
             input_dim=feature_extractor.output_dim,
             num_classes=num_classes
