@@ -2,12 +2,11 @@
 Dataset Handling for unsupervised domain adaptation by backpropagation 
 Authors: Ganin & Lempitsky, 2015 Reproduction
 
-This module implements:
-- MNIST, MNIST-M (generated), SVHN datasets
-- Synthetic Numbers and Synthetic Signs generation
+This module provides dataset classes and data loaders for various domain adaptation experiments.:
+- MNIST, MNIST-M (generated), SVHN datasets , Synthetic Numbers (generated), Synthetic Signs (generated)
 - GTSRB (German Traffic Sign Recognition Benchmark)
 - Office dataset (Amazon, DSLR, Webcam)
-- Data augmentation and preprocessing as per paper
+- data preprocessing
 """
 
 import os
@@ -78,7 +77,7 @@ class MNIST(Dataset):
         self.transform = transform
         self.train = train
 
-        # Use torchvision MNIST (already creates MNIST/ subfolder automatically)
+        # Use torchvision MNIST 
         self.mnist = datasets.MNIST(
             root=root,
             train=train,
@@ -103,13 +102,9 @@ class MNIST(Dataset):
 class MNISTM(Dataset):
     """
     MNIST-M Dataset: MNIST digits blended over color patches.
-    
-    As described in the paper:
-    "We blend digits from the original set over patches randomly extracted 
-    from color photos from BSDS500. This operation is formally defined as:
-    I_out_ijk = |I_1_ijk - I_2_ijk|"
-    
-    Where I_1 is the digit and I_2 is the background patch.
+
+    Digits from the original MNIST are blended over patches randomly extracted
+    from color photos from BSDS500 using absolute difference blending.
     """
     
     def __init__(
@@ -153,14 +148,14 @@ class MNISTM(Dataset):
         mnistm_dir = self.root / 'mnist_m'
         mnistm_dir.mkdir(parents=True, exist_ok=True)
 
-        # Download and load MNIST (torchvision creates MNIST/ subfolder automatically)
+        # Download and load MNIST 
         mnist = datasets.MNIST(
             root=str(self.root),
             train=self.train,
             download=True
         )
         
-        # Download BSDS500 or use random colored patches as fallback
+        # Download BSDS500 
         bsds_patches = self._get_background_patches()
         
         # Generate blended images
@@ -183,9 +178,7 @@ class MNISTM(Dataset):
             
             # Create 3-channel digit image
             digit_rgb = np.stack([img, img, img], axis=-1)
-            
-            # Blend using absolute difference (as per paper)
-            # I_out = |I_1 - I_2| where I_1 is digit, I_2 is background
+
             blended = np.abs(digit_rgb.astype(np.int32) - background.astype(np.int32))
             blended = blended.astype(np.uint8)
             
@@ -328,12 +321,10 @@ class SVHN(Dataset):
 class SyntheticNumbers(Dataset):
     """
     Synthetic Numbers Dataset.
-    
-    As described in the paper:
-    "500,000 images generated from Windows fonts by varying the text
-    (that includes different one-, two-, and three-digit numbers),
-    positioning, orientation, background and stroke colors, and the
-    amount of blur."
+
+    500,000 images generated from Windows fonts by varying the text
+    (one-, two-, and three-digit numbers), positioning, orientation,
+    background and stroke colors, and the amount of blur.
     """
     
     def __init__(
@@ -457,163 +448,113 @@ class SyntheticNumbers(Dataset):
 
 class SyntheticSigns(Dataset):
     """
-    Synthetic Traffic Signs Dataset.
-    
-    As described in the paper:
-    "100,000 synthetic images simulating various photo-shooting conditions"
-    for 43 traffic sign classes.
+    Synthetic Traffic Signs Dataset (SynSigns from SynsetSignsetGermany).
+
+    Loads realistic rendered traffic signs from the Cycles folder:
+    datasets/SynsetSignsetGermany/Cycles/
+
+    The Cycles folder contains high-quality 3D rendered images (208x208 RGB)
+    with realistic lighting and textures, NOT semantic segmentation masks.
+    Images are named with suffix "_cycles.png".
+
+    Args:
+        root: Root directory containing datasets/
+        train: If True, returns training split (80%), else test split (20%)
+        transform: Image transformations to apply
+        download: Not used (dataset must be pre-downloaded)
+        use_augmented: Not currently used (kept for backwards compatibility)
     """
-    
+
     def __init__(
         self,
         root: str,
         train: bool = True,
         transform: Optional[Callable] = None,
         download: bool = False,
-        num_samples: int = 100000
+        use_augmented: bool = False
     ):
         self.root = Path(root)
         self.transform = transform
         self.train = train
-        self.num_samples = num_samples if train else 10000
+        self.use_augmented = use_augmented
         self.num_classes = 43
-        
-        syn_dir = self.root / 'syn_signs'
-        pkl_path = syn_dir / ('train.pkl' if train else 'test.pkl')
-        
-        if pkl_path.exists():
-            self._load_preprocessed(pkl_path)
-        elif download:
-            self._generate_synthetic_signs()
+
+        self.data = []
+        self.targets = []
+
+        # Use Cycles folder from SynsetSignsetGermany (realistic rendered images)
+        synsigns_base = self.root / 'SynsetSignsetGermany'
+        synsigns_dir = synsigns_base / 'Cycles'
+
+        if not synsigns_dir.exists():
+            error_msg = f"SynSigns Cycles folder not found at {synsigns_dir}.\n"
+            error_msg += "Please ensure the SynsetSignsetGermany dataset is extracted to datasets/\n"
+            error_msg += "Expected structure: datasets/SynsetSignsetGermany/Cycles/\n"
+            error_msg += "The Cycles folder should contain realistic rendered traffic sign images."
+            raise RuntimeError(error_msg)
+
+        self._load_data(synsigns_dir)
+
+        # Split into train/test (80/20 split)
+        total_samples = len(self.data)
+        split_idx = int(0.8 * total_samples)
+
+        if train:
+            self.data = self.data[:split_idx]
+            self.targets = self.targets[:split_idx]
         else:
-            raise RuntimeError(
-                f"Synthetic Signs not found at {pkl_path}. "
-                "Set download=True to generate it."
-            )
-    
-    def _load_preprocessed(self, path: Path) -> None:
-        """Load preprocessed data from pickle file."""
-        with open(path, 'rb') as f:
-            data_dict = pickle.load(f)
-        self.data = data_dict['data']
-        self.targets = data_dict['targets']
-    
-    def _generate_synthetic_signs(self) -> None:
-        """Generate synthetic traffic sign images."""
-        print(f"Generating Synthetic Signs dataset ({self.num_samples} samples)...")
-        
-        syn_dir = self.root / 'syn_signs'
-        syn_dir.mkdir(parents=True, exist_ok=True)
-        
-        from PIL import ImageDraw, ImageFilter
-        
-        # Traffic sign colors by category
-        sign_colors = {
-            'prohibitory': ((255, 255, 255), (255, 0, 0)),    # White bg, red border
-            'mandatory': ((0, 0, 255), (255, 255, 255)),       # Blue bg, white symbol
-            'danger': ((255, 255, 255), (255, 0, 0)),          # White bg, red border
-            'other': ((255, 255, 0), (0, 0, 0)),               # Yellow bg, black symbol
-        }
-        
-        data = []
-        targets = []
-        
-        for i in range(self.num_samples):
-            # Random class (0-42)
-            class_id = np.random.randint(0, self.num_classes)
-            
-            # Determine sign type based on GTSRB class groupings
-            if class_id < 8:
-                sign_type = 'danger'
-            elif class_id < 18:
-                sign_type = 'prohibitory'
-            elif class_id < 33:
-                sign_type = 'mandatory'
-            else:
-                sign_type = 'other'
-            
-            bg_color, symbol_color = sign_colors[sign_type]
-            
-            # Random background
-            scene_bg = tuple(np.random.randint(100, 200, 3))
-            img = Image.new('RGB', (40, 40), scene_bg)
-            draw = ImageDraw.Draw(img)
-            
-            # Draw sign (simplified)
-            margin = np.random.randint(2, 6)
-            
-            if sign_type in ['danger']:
-                # Triangle
-                points = [
-                    (20, margin),
-                    (40 - margin, 40 - margin),
-                    (margin, 40 - margin)
-                ]
-                draw.polygon(points, fill=bg_color, outline=symbol_color)
-            elif sign_type in ['prohibitory', 'mandatory']:
-                # Circle
-                draw.ellipse(
-                    [margin, margin, 40 - margin, 40 - margin],
-                    fill=bg_color,
-                    outline=symbol_color
-                )
-            else:
-                # Rectangle
-                draw.rectangle(
-                    [margin, margin, 40 - margin, 40 - margin],
-                    fill=bg_color,
-                    outline=symbol_color
-                )
-            
-            # Add class number as simple symbol
-            try:
-                from PIL import ImageFont
-                font = ImageFont.load_default()
-                text = str(class_id % 10)
-                draw.text((15, 15), text, fill=symbol_color, font=font)
-            except:
-                pass
-            
-            # Random blur
-            if np.random.random() > 0.5:
-                blur_radius = np.random.uniform(0, 1.0)
-                img = img.filter(ImageFilter.GaussianBlur(blur_radius))
-            
-            # Random brightness adjustment
-            if np.random.random() > 0.5:
-                from PIL import ImageEnhance
-                enhancer = ImageEnhance.Brightness(img)
-                factor = np.random.uniform(0.7, 1.3)
-                img = enhancer.enhance(factor)
-            
-            data.append(np.array(img))
-            targets.append(class_id)
-            
-            if (i + 1) % 10000 == 0:
-                print(f"  Generated {i + 1}/{self.num_samples} samples")
-        
-        self.data = np.array(data)
-        self.targets = targets
-        
-        # Save preprocessed data
-        pkl_path = syn_dir / ('train.pkl' if self.train else 'test.pkl')
-        with open(pkl_path, 'wb') as f:
-            pickle.dump({'data': self.data, 'targets': self.targets}, f)
-        
-        print(f"Synthetic Signs saved to {pkl_path}")
-    
+            self.data = self.data[split_idx:]
+            self.targets = self.targets[split_idx:]
+
+        print(f"SynSigns Cycles {'train' if train else 'test'}: {len(self.data)} images")
+
+    def _load_data(self, data_dir: Path) -> None:
+        """Load SynSigns images from class folders."""
+        import random
+
+        # Get all class folders (0_Geschwindigkeit20, 1_Geschwindigkeit30, etc.)
+        class_folders = sorted([f for f in os.listdir(data_dir)
+                               if os.path.isdir(os.path.join(data_dir, f))])
+
+        all_samples = []
+
+        for class_folder in class_folders:
+            # Extract class number from folder name (e.g., "0_Geschwindigkeit20" -> 0)
+            class_num = int(class_folder.split('_')[0])
+
+            # Only process classes 0-42 (43 classes total)
+            if class_num >= self.num_classes:
+                continue
+
+            class_path = os.path.join(data_dir, class_folder)
+
+            # Get all Cycles images (*_cycles.png) in this class
+            for img_file in os.listdir(class_path):
+                if img_file.endswith('_cycles.png'):
+                    img_path = os.path.join(class_path, img_file)
+                    all_samples.append((img_path, class_num))
+
+        # Shuffle samples to mix classes (deterministic with seed)
+        random.Random(42).shuffle(all_samples)
+
+        # Separate into data and targets
+        self.data = [sample[0] for sample in all_samples]
+        self.targets = [sample[1] for sample in all_samples]
+
+        print(f"Loaded {len(self.data)} SynSigns images from {data_dir}")
+
     def __len__(self) -> int:
         return len(self.data)
-    
+
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int]:
-        img = self.data[idx]
+        img_path = self.data[idx]
         target = self.targets[idx]
-        
-        img = Image.fromarray(img)
-        
+
+        img = Image.open(img_path).convert('RGB')
+
         if self.transform is not None:
             img = self.transform(img)
-        
+
         return img, target
 
 
@@ -621,8 +562,10 @@ class GTSRB(Dataset):
     """
     German Traffic Sign Recognition Benchmark (GTSRB).
     43 classes of traffic signs.
+
+    Uses torchvision's built-in GTSRB dataset for automatic downloading.
     """
-    
+
     def __init__(
         self,
         root: str,
@@ -630,169 +573,170 @@ class GTSRB(Dataset):
         transform: Optional[Callable] = None,
         download: bool = False
     ):
-        self.root = Path(root)
-        self.transform = transform
-        self.train = train
-        
-        self.data = []
-        self.targets = []
-        
-        gtsrb_dir = self.root / 'GTSRB'
-        
-        if train:
-            data_dir = gtsrb_dir / 'Final_Training' / 'Images'
-        else:
-            data_dir = gtsrb_dir / 'Final_Test' / 'Images'
-        
-        if data_dir.exists():
-            self._load_data(data_dir)
-        elif download:
-            self._download_and_extract()
-            self._load_data(data_dir)
-        else:
-            raise RuntimeError(
-                f"GTSRB not found at {gtsrb_dir}. "
-                "Please download from: https://benchmark.ini.rub.de/gtsrb_dataset.html "
-                "and extract to datasets/GTSRB/"
-            )
-    
-    def _download_and_extract(self) -> None:
-        """Download GTSRB dataset."""
-        print("GTSRB requires manual download.")
-        print("Please download from: https://benchmark.ini.rub.de/gtsrb_dataset.html")
-        print("Extract to: datasets/GTSRB/")
-        raise RuntimeError("GTSRB download not implemented. Please download manually.")
-    
-    def _load_data(self, data_dir: Path) -> None:
-        """Load GTSRB images and labels."""
-        import csv
-        
-        if self.train:
-            # Load training data from class directories
-            for class_id in range(43):
-                class_dir = data_dir / f'{class_id:05d}'
-                if not class_dir.exists():
-                    continue
-                
-                # Read annotation file
-                annotation_file = class_dir / f'GT-{class_id:05d}.csv'
-                if annotation_file.exists():
-                    with open(annotation_file, 'r') as f:
-                        reader = csv.DictReader(f, delimiter=';')
-                        for row in reader:
-                            img_path = class_dir / row['Filename']
-                            if img_path.exists():
-                                self.data.append(str(img_path))
-                                self.targets.append(int(row['ClassId']))
-        else:
-            # Load test data
-            annotation_file = data_dir / 'GT-final_test.csv'
-            if annotation_file.exists():
-                with open(annotation_file, 'r') as f:
-                    reader = csv.DictReader(f, delimiter=';')
-                    for row in reader:
-                        img_path = data_dir / row['Filename']
-                        if img_path.exists():
-                            self.data.append(str(img_path))
-                            self.targets.append(int(row['ClassId']))
-    
+        from torchvision.datasets import GTSRB as TorchvisionGTSRB
+
+        # Use torchvision's GTSRB dataset
+        # Note: torchvision only provides the training split (test set has no labels)
+        # We'll split the training set in get_dataloaders()
+        self.dataset = TorchvisionGTSRB(
+            root=root,
+            split='train',  # Always use train split because it has labels
+            transform=transform,
+            download=download
+        )
+
+        # Extract data and targets for compatibility
+        self.data = self.dataset._samples  # Access internal samples list
+        self.targets = [s[1] for s in self.dataset._samples]  # Extract labels
+
     def __len__(self) -> int:
-        return len(self.data)
-    
+        return len(self.dataset)
+
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int]:
-        img_path = self.data[idx]
-        target = self.targets[idx]
-        
-        img = Image.open(img_path).convert('RGB')
-        
-        if self.transform is not None:
-            img = self.transform(img)
-        
-        return img, target
+        return self.dataset[idx]
 
 
 class Office(Dataset):
     """
     Office Dataset (Amazon, DSLR, Webcam).
     31 object categories.
-    
-    Requires manual download from:
-    https://faculty.cc.gatech.edu/~judy/domainadapt/
+
+    This version supports explicit subsetting via subset_paths,
+    which we use to create proper train/test splits (no leakage).
     """
-    
+
     def __init__(
         self,
         root: str,
-        domain: str = 'amazon',  # 'amazon', 'dslr', 'webcam'
+        domain: str = 'amazon',
         transform: Optional[Callable] = None,
-        download: bool = False
+        download: bool = False,
+        samples_per_class: Optional[int] = None,
+        seed: int = 42,
+        subset_paths: Optional[List[str]] = None,   # NEW
     ):
         self.root = Path(root)
         self.domain = domain.lower()
         self.transform = transform
-        
-        self.data = []
-        self.targets = []
-        self.classes = []
-        
+        self.samples_per_class = samples_per_class
+        self.seed = seed
+
+        self.data: List[str] = []
+        self.targets: List[int] = []
+        self.classes: List[str] = []
+
         office_dir = self.root / 'office31' / self.domain / 'images'
-        
-        if office_dir.exists():
-            self._load_data(office_dir)
-        elif download:
-            print(f"Office dataset requires manual download.")
-            print("Please download from: https://faculty.cc.gatech.edu/~judy/domainadapt/")
-            print(f"Extract to: {self.root}/office31/")
-            raise RuntimeError("Office dataset not found. Please download manually.")
-        else:
+
+        if not office_dir.exists():
+            if download:
+                print("Office dataset requires manual download.")
+                print("Please download from: https://faculty.cc.gatech.edu/~judy/domainadapt/")
+                print(f"Extract to: {self.root}/office31/")
             raise RuntimeError(
                 f"Office dataset not found at {office_dir}. "
                 "Please download from https://faculty.cc.gatech.edu/~judy/domainadapt/ "
                 f"and extract to {self.root}/office31/"
             )
-    
-    def _load_data(self, data_dir: Path) -> None:
-        """Load Office dataset images and labels."""
-        self.classes = sorted([
-            d.name for d in data_dir.iterdir() if d.is_dir()
-        ])
-        
-        class_to_idx = {cls: idx for idx, cls in enumerate(self.classes)}
-        
-        for class_name in self.classes:
+
+        # If subset_paths is provided, we build ONLY from those paths
+        if subset_paths is not None:
+            self._load_from_subset(office_dir, subset_paths)
+        else:
+            self._load_data(office_dir)
+
+    def _scan_all(self, data_dir: Path) -> Tuple[List[str], List[int], List[str]]:
+        """
+        Scan all images and return (paths, targets, classes).
+        Deterministic class ordering.
+        """
+        classes = sorted([d.name for d in data_dir.iterdir() if d.is_dir()])
+        class_to_idx = {cls: idx for idx, cls in enumerate(classes)}
+
+        all_paths: List[str] = []
+        all_targets: List[int] = []
+
+        for class_name in classes:
             class_dir = data_dir / class_name
             for img_path in class_dir.glob('*'):
                 if img_path.suffix.lower() in ['.jpg', '.jpeg', '.png']:
-                    self.data.append(str(img_path))
-                    self.targets.append(class_to_idx[class_name])
-    
+                    all_paths.append(str(img_path))
+                    all_targets.append(class_to_idx[class_name])
+
+        return all_paths, all_targets, classes
+
+    def _load_from_subset(self, data_dir: Path, subset_paths: List[str]) -> None:
+        """
+        Load a dataset consisting ONLY of subset_paths.
+        Targets are inferred from folder name.
+        """
+        # Build class mapping from directory structure
+        self.classes = sorted([d.name for d in data_dir.iterdir() if d.is_dir()])
+        class_to_idx = {cls: idx for idx, cls in enumerate(self.classes)}
+
+        loaded_count = 0
+        for p in subset_paths:
+            if not os.path.exists(p):
+                continue
+            # folder name is the class
+            class_name = Path(p).parent.name
+            if class_name not in class_to_idx:
+                continue
+            self.data.append(p)
+            self.targets.append(class_to_idx[class_name])
+            loaded_count += 1
+
+    def _load_data(self, data_dir: Path) -> None:
+        """
+        Original behavior: optionally sample samples_per_class per class.
+        NOTE: we won't use this for source splits anymore — we'll build splits outside.
+        """
+        import random
+
+        self.classes = sorted([d.name for d in data_dir.iterdir() if d.is_dir()])
+        class_to_idx = {cls: idx for idx, cls in enumerate(self.classes)}
+        rng = random.Random(self.seed)
+
+        for class_name in self.classes:
+            class_dir = data_dir / class_name
+            class_images = [
+                str(p) for p in class_dir.glob('*')
+                if p.suffix.lower() in ['.jpg', '.jpeg', '.png']
+            ]
+
+            if self.samples_per_class is not None and len(class_images) > self.samples_per_class:
+                class_images = rng.sample(class_images, self.samples_per_class)
+
+            for img_path in class_images:
+                self.data.append(img_path)
+                self.targets.append(class_to_idx[class_name])
+
+        print(f"[DEBUG] _load_data for {self.domain}: loaded {len(self.data)} images")
+
     def __len__(self) -> int:
         return len(self.data)
-    
+
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int]:
         img_path = self.data[idx]
         target = self.targets[idx]
-        
+
         img = Image.open(img_path).convert('RGB')
-        
+
         if self.transform is not None:
             img = self.transform(img)
-        
+
         return img, target
 
 
 def get_mnist_transforms(train: bool = True) -> transforms.Compose:
     """
     Transforms for MNIST/MNIST-M experiments.
-    Paper uses mean subtraction. Images are 28x28.
+    Images are 28x28 with mean subtraction normalization.
     """
     transform_list = [
         transforms.Resize((28, 28)),
         transforms.ToTensor(),
     ]
     
-    # Mean subtraction (paper mentions this)
-    # Using ImageNet-style normalization as approximation
     transform_list.append(
         transforms.Normalize(
             mean=[0.5, 0.5, 0.5],
@@ -803,20 +747,18 @@ def get_mnist_transforms(train: bool = True) -> transforms.Compose:
     return transforms.Compose(transform_list)
 
 
-def get_svhn_transforms(train: bool = True) -> transforms.Compose:
+def get_svhn_transforms(train: bool = True, data_root: str = './datasets') -> transforms.Compose:
     """
     Transforms for SVHN/SynNumbers experiments.
-    Paper uses mean subtraction. Images are 32x32.
+    Standardization to [-1, 1] range for stability.
     """
     transform_list = [
         transforms.Resize((32, 32)),
         transforms.ToTensor(),
-        transforms.Normalize(
-            mean=[0.5, 0.5, 0.5],
-            std=[0.5, 0.5, 0.5]
-        )
+        # Fixed normalization to [-1, 1] range
+        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ]
-    
+
     return transforms.Compose(transform_list)
 
 
@@ -824,6 +766,7 @@ def get_gtsrb_transforms(train: bool = True) -> transforms.Compose:
     """
     Transforms for GTSRB/SynSigns experiments.
     Images are resized to 40x40.
+    No data augmentation.
     """
     transform_list = [
         transforms.Resize((40, 40)),
@@ -833,7 +776,7 @@ def get_gtsrb_transforms(train: bool = True) -> transforms.Compose:
             std=[0.5, 0.5, 0.5]
         )
     ]
-    
+
     return transforms.Compose(transform_list)
 
 
@@ -841,29 +784,18 @@ def get_office_transforms(train: bool = True) -> transforms.Compose:
     """
     Transforms for Office dataset experiments.
     Uses AlexNet-style preprocessing (224x224).
+    No data augmentation.
     """
-    if train:
-        transform_list = [
-            transforms.Resize(256),
-            transforms.RandomCrop(224),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225]
-            )
-        ]
-    else:
-        transform_list = [
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225]
-            )
-        ]
-    
+    transform_list = [
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        )
+    ]
+
     return transforms.Compose(transform_list)
 
 
@@ -873,61 +805,202 @@ def get_dataloaders(
     data_root: str = './datasets',
     batch_size: int = 128,
     num_workers: int = 4,
-    download: bool = True
+    download: bool = True,
+    seed: int = 42,
+    use_augmented_synsigns: bool = False  # Not currently used
 ) -> Tuple[DataLoader, DataLoader, DataLoader, DataLoader]:
-    """
-    Create dataloaders for source and target domains.
-    
-    Args:
-        source: Source domain name
-        target: Target domain name
-        data_root: Root directory for datasets
-        batch_size: Batch size (paper uses 128)
-        num_workers: Number of data loading workers
-        download: Whether to download/generate datasets
-        
-    Returns:
-        Tuple of (source_train_loader, source_test_loader,
-                  target_train_loader, target_test_loader)
-    """
-    # Determine experiment type and get appropriate transforms/datasets
     experiment_config = _get_experiment_config(source, target)
-    
+
     source_transform_train = experiment_config['transform_train']
     source_transform_test = experiment_config['transform_test']
     target_transform_train = experiment_config['transform_train']
     target_transform_test = experiment_config['transform_test']
-    
-    # Create source datasets
-    source_train = _create_dataset(
-        source, data_root, train=True,
-        transform=source_transform_train, download=download
-    )
-    source_test = _create_dataset(
-        source, data_root, train=False,
-        transform=source_transform_test, download=download
-    )
-    
-    # Create target datasets
-    target_train = _create_dataset(
-        target, data_root, train=True,
-        transform=target_transform_train, download=download
-    )
-    target_test = _create_dataset(
-        target, data_root, train=False,
-        transform=target_transform_test, download=download
-    )
+
+    # --- Office special handling: proper 5-split protocol without leakage ---
+    if source.lower() in ['amazon', 'dslr', 'webcam'] and target.lower() in ['amazon', 'dslr', 'webcam']:
+        # N labeled source examples per class (standard protocol)
+        source_samples = 20 if source.lower() == 'amazon' else 8
+
+        # Build a full list of source images first (no sampling)
+        source_full = Office(
+            root=data_root,
+            domain=source,
+            transform=source_transform_train,
+            download=download,
+            samples_per_class=None,
+            seed=seed
+        )
+
+        # Group indices by class, sample N/class for train, rest for test
+        import random
+        rng = random.Random(seed)
+
+        class_to_paths = {c: [] for c in range(31)}
+        for p, y in zip(source_full.data, source_full.targets):
+            class_to_paths[y].append(p)
+
+        source_train_paths = []
+        source_test_paths = []
+
+        for c in range(31):
+            paths = class_to_paths[c]
+            rng.shuffle(paths)
+            n = min(source_samples, len(paths))
+            source_train_paths.extend(paths[:n])
+            source_test_paths.extend(paths[n:])
+
+        print(f"[DEBUG] {source.upper()} split: {len(source_train_paths)} train, {len(source_test_paths)} test")
+
+        # Source train/test datasets from explicit subsets
+        source_train = Office(
+            root=data_root,
+            domain=source,
+            transform=source_transform_train,
+            download=download,
+            subset_paths=source_train_paths,
+            seed=seed
+        )
+        source_test = Office(
+            root=data_root,
+            domain=source,
+            transform=source_transform_test,
+            download=download,
+            subset_paths=source_test_paths,
+            seed=seed
+        )
+
+        # Target: use ALL images unlabeled for training (transductive)
+        target_train = Office(
+            root=data_root,
+            domain=target,
+            transform=target_transform_train,
+            download=download,
+            samples_per_class=None,
+            seed=seed
+        )
+        # Target eval: typically evaluate on ALL target images (labels not used in training)
+        target_test = Office(
+            root=data_root,
+            domain=target,
+            transform=target_transform_test,
+            download=download,
+            samples_per_class=None,
+            seed=seed
+        )
+
+        print(f"[DEBUG] {target.upper()} dataset: {len(target_train)} train, {len(target_test)} test")
+
+    elif target.lower() == 'gtsrb' or source.lower() == 'gtsrb':
+        # GTSRB special handling: test set has no labels, so split training set
+        from torch.utils.data import Subset
+        import random
+
+        # Load full GTSRB dataset (always from training data which has labels)
+        if source.lower() == 'gtsrb':
+            source_full = GTSRB(data_root, train=True, transform=source_transform_train, download=download)
+
+            # Split into train/test (80/20)
+            rng = random.Random(seed)
+            indices = list(range(len(source_full)))
+            rng.shuffle(indices)
+
+            split_idx = int(0.8 * len(indices))
+            train_indices = indices[:split_idx]
+            test_indices = indices[split_idx:]
+
+            source_train = Subset(source_full, train_indices)
+
+            # Create test set with test transform
+            source_test_full = GTSRB(data_root, train=True, transform=source_transform_test, download=download)
+            source_test = Subset(source_test_full, test_indices)
+
+            print(f"GTSRB source split: {len(source_train)} train, {len(source_test)} test")
+        else:
+            source_train = _create_dataset(
+                source, data_root, train=True,
+                transform=source_transform_train, download=download,
+                use_augmented=use_augmented_synsigns
+            )
+            source_test = _create_dataset(
+                source, data_root, train=False,
+                transform=source_transform_test, download=download,
+                use_augmented=use_augmented_synsigns
+            )
+
+        if target.lower() == 'gtsrb':
+            target_full = GTSRB(data_root, train=True, transform=target_transform_train, download=download)
+
+            # Split into train/test (80/20)
+            rng = random.Random(seed)
+            indices = list(range(len(target_full)))
+            rng.shuffle(indices)
+
+            split_idx = int(0.8 * len(indices))
+            train_indices = indices[:split_idx]
+            test_indices = indices[split_idx:]
+
+            target_train = Subset(target_full, train_indices)
+
+            # Create test set with test transform
+            target_test_full = GTSRB(data_root, train=True, transform=target_transform_test, download=download)
+            target_test = Subset(target_test_full, test_indices)
+
+            print(f"GTSRB target split: {len(target_train)} train, {len(target_test)} test")
+        else:
+            target_train = _create_dataset(
+                target, data_root, train=True,
+                transform=target_transform_train, download=download,
+                use_augmented=use_augmented_synsigns
+            )
+            target_test = _create_dataset(
+                target, data_root, train=False,
+                transform=target_transform_test, download=download,
+                use_augmented=use_augmented_synsigns
+            )
+
+    else:
+        # --- Non-Office, non-GTSRB datasets: keep original logic ---
+        source_samples = None
+        if source.lower() in ['amazon', 'dslr', 'webcam']:
+            source_samples = 20 if source.lower() == 'amazon' else 8
+
+        source_train = _create_dataset(
+            source, data_root, train=True,
+            transform=source_transform_train, download=download,
+            samples_per_class=source_samples, seed=seed,
+            use_augmented=use_augmented_synsigns
+        )
+        source_test = _create_dataset(
+            source, data_root, train=False,
+            transform=source_transform_test, download=download,
+            use_augmented=use_augmented_synsigns
+        )
+
+        target_train = _create_dataset(
+            target, data_root, train=True,
+            transform=target_transform_train, download=download,
+            use_augmented=use_augmented_synsigns
+        )
+        target_test = _create_dataset(
+            target, data_root, train=False,
+            transform=target_transform_test, download=download,
+            use_augmented=use_augmented_synsigns
+        )
     
     # Create dataloaders
+    # Paper: "128 sized batches. A half of each batch is populated by the samples
+    # from the source domain (with known labels), the rest is comprised of the
+    # target domain (with unknown labels)."
+    # So: batch_size/2 source + batch_size/2 target = batch_size total
     source_train_loader = DataLoader(
         source_train,
-        batch_size=batch_size,
+        batch_size=batch_size // 2,  # Half batch for source
         shuffle=True,
         num_workers=num_workers,
         drop_last=True,
         pin_memory=True
     )
-    
+
     source_test_loader = DataLoader(
         source_test,
         batch_size=batch_size,
@@ -935,16 +1008,16 @@ def get_dataloaders(
         num_workers=num_workers,
         pin_memory=True
     )
-    
+
     target_train_loader = DataLoader(
         target_train,
-        batch_size=batch_size,
+        batch_size=batch_size // 2,  # Half batch for target
         shuffle=True,
         num_workers=num_workers,
         drop_last=True,
         pin_memory=True
     )
-    
+
     target_test_loader = DataLoader(
         target_test,
         batch_size=batch_size,
@@ -961,8 +1034,8 @@ def _get_experiment_config(source: str, target: str) -> dict:
     source = source.lower()
     target = target.lower()
     
-    # MNIST <-> MNIST-M
-    if source in ['mnist', 'mnistm'] and target in ['mnist', 'mnistm']:
+    # MNIST <-> MNIST-M (handle all naming variations: mnist_m, mnistm)
+    if source in ['mnist', 'mnistm', 'mnist_m'] and target in ['mnist', 'mnistm', 'mnist_m']:
         return {
             'transform_train': get_mnist_transforms(train=True),
             'transform_test': get_mnist_transforms(train=False),
@@ -1011,11 +1084,20 @@ def _create_dataset(
     root: str,
     train: bool,
     transform: Callable,
-    download: bool
-) -> Dataset:
-    """Create dataset by name."""
+    download: bool,
+    samples_per_class: Optional[int] = None,
+    seed: int = 42,
+    use_augmented: bool = False  # Not currently used
+)-> Dataset:
     name = name.lower()
-    
+
+    # Handle naming variations
+    name_mappings = {
+        'mnist_m': 'mnistm',  # Support both mnist_m and mnistm
+        'synsigns': 'syn_signs',
+    }
+    name = name_mappings.get(name, name)
+
     if name == 'mnist':
         return MNIST(root, train=train, transform=transform, download=download)
     elif name == 'mnistm':
@@ -1025,11 +1107,14 @@ def _create_dataset(
     elif name == 'syn_numbers':
         return SyntheticNumbers(root, train=train, transform=transform, download=download)
     elif name == 'syn_signs':
-        return SyntheticSigns(root, train=train, transform=transform, download=download)
+        # Use SynSigns Cycles dataset (realistic 3D rendered traffic signs)
+        return SyntheticSigns(root, train=train, transform=transform,
+                            use_augmented=use_augmented)
     elif name == 'gtsrb':
         return GTSRB(root, train=train, transform=transform, download=download)
     elif name in ['amazon', 'dslr', 'webcam']:
-        return Office(root, domain=name, transform=transform, download=download)
+        return Office(root, domain=name, transform=transform, download=download,
+                     samples_per_class=samples_per_class, seed=seed)
     else:
         raise ValueError(f"Unknown dataset: {name}")
 
