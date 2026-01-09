@@ -51,7 +51,8 @@ python syngen.py
 # Output: datasets/syn_numbers/{train,test}.pkl
 ```
 
-
+### 1. Downloading trained models 
+all trained models are available via this link : 
 ### 2. Train DANN Model
 
 #### Using configuration files (recommended):
