@@ -1,0 +1,20 @@
+source: dslr
+target: webcam
+data_root: ./datasets
+epochs: 60
+batch_size: 32
+lr: 0.001
+momentum: 0.9
+weight_decay: 0.0005
+gamma: 10.0
+lr_alpha: 10.0
+lr_beta: 0.75
+# pretrained: true
+experiment_name: dslr_to_webcam
+checkpoint_dir: ./checkpoints
+results_dir: ./results
+save_freq: 20
+num_workers: 4
+train_dann: true
+train_source_only: true
+seed: 42
